@@ -15,7 +15,7 @@ def find_nearest_category(product_embedding: list[float], top_k: int = 1) -> lis
                 "index": "category_vector_index",
                 "path": "embedding",
                 "queryVector": product_embedding,
-                "numCandidates": 50,
+                "numCandidates": 768,
                 "limit": top_k
             }
         },
@@ -24,7 +24,7 @@ def find_nearest_category(product_embedding: list[float], top_k: int = 1) -> lis
                 "_id": 0,
                 "name": 1,
                 "sourceId": 1,
-                "score": {"$meta": "vectorSearchScore"}
+                "score": {"$meta": "vectorSearchScore"}   #categories are stored in the db with a field called "embedding"
             }
         }
     ]
@@ -40,7 +40,7 @@ def find_confident_category(product_embedding: list[float]) -> dict | None:
 
     top_match = matches[0]
     # Temporarily disabled to observe real scores:
-    # if top_match["score"] < MIN_CONFIDENCE_SCORE:
-    #     return None
+    if top_match["score"] < MIN_CONFIDENCE_SCORE:
+        return None
 
     return top_match

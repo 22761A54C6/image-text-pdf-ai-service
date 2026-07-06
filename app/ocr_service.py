@@ -7,24 +7,24 @@ ocr_engine = PaddleOCR(use_angle_cls=True, lang="en")
 
 
 def preprocess_image(image_path: str):
-    """Grayscale -> denoise -> threshold -> upscale if small.
-    Improves OCR accuracy on photographed (non-scanned) menus.
-    """
+    """Upscale only if small. Denoise + Otsu threshold were removed —
+    testing showed they caused missed lines (e.g. Tempura Haddock,
+    Herb-Crusted Monkfish vanished) and character-level misreads
+    (e.g. 'Style' -> 'Styte', 'Pollock' -> 'Pallock')."""
     img = cv2.imread(image_path)
     if img is None:
         raise HTTPException(status_code=400, detail="Could not read uploaded image")
-    #Grayscale
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    denoised = cv2.fastNlMeansDenoising(gray, h=10)
-    _, thresh = cv2.threshold(denoised, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
-    #Upscale if small (improves OCR accuracy)
-    h, w = thresh.shape
-    if w < 1200:
-        scale = 1200 / w
-        thresh = cv2.resize(thresh, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+    
 
-    return thresh
+
+    target_width = 2400  # more aggressive than before
+    h, w = img.shape[:2]
+    if w < target_width:
+        scale = target_width / w
+        img = cv2.resize(img, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+
+    return img
 
 
 def run_ocr(processed_img) -> str:

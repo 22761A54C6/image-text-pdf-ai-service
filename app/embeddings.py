@@ -1,4 +1,4 @@
-from sys import prefix
+
 from typing import List
 
 import requests
@@ -11,7 +11,7 @@ from app.matching import find_confident_category
 def get_embedding(text: str) -> List[float]:
     response = requests.post(OLLAMA_EMBED_URL, json={
         "model": OLLAMA_EMBED_MODEL,
-        "prompt":  f"{prefix}: {text}"
+        "prompt": text
     })
     response.raise_for_status()
     return response.json()["embedding"]
