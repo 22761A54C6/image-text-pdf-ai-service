@@ -4,6 +4,8 @@ import tempfile
 from fastapi import FastAPI, HTTPException, UploadFile, File
 
 from app.config import ALLOWED_CONTENT_TYPES, MAX_FILE_SIZE_BYTES
+from app.document_loader import load_document_text
+# remove: from app.ocr_service import preprocess_image, run_ocr
 from app.models import ExtractResponse
 from app.ocr_service import preprocess_image, run_ocr
 from app.extraction import extract_products_with_llm
@@ -40,8 +42,10 @@ async def extract(file: UploadFile = File(...)):
             tmp.write(contents)
             tmp_path = tmp.name
 
-        processed = preprocess_image(tmp_path)
-        raw_text = run_ocr(processed)
+        # processed = preprocess_image(tmp_path)
+        # raw_text = run_ocr(processed)
+
+        raw_text = load_document_text(tmp_path, file.content_type)
 
         if not raw_text.strip():
             raise HTTPException(status_code=422, detail="No text detected in image")
