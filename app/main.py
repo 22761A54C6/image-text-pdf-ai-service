@@ -5,11 +5,10 @@ from fastapi import FastAPI, HTTPException, UploadFile, File
 
 from app.config import ALLOWED_CONTENT_TYPES, MAX_FILE_SIZE_BYTES
 from app.document_loader import load_document_text
-# remove: from app.ocr_service import preprocess_image, run_ocr
 from app.models import ExtractResponse
 from app.ocr_service import preprocess_image, run_ocr
 from app.extraction import extract_products_with_llm
-from app.embeddings import embed_and_store
+from app.embeddings import embed_and_store, backfill_embeddings
 from app.sync_categories import sync_categories
 
 app = FastAPI(title="Menu AI Extraction Service")
@@ -19,6 +18,17 @@ app = FastAPI(title="Menu AI Extraction Service")
 def startup_sync_categories():
     print("[startup] Syncing categories from Spring Boot API...")
     sync_categories()
+
+    print("[startup] Backfilling embeddings for any un-embedded products...")
+    try:
+        backfill_embeddings(
+            collection_name="products",
+            text_field="name",
+            vector_index_name="product_vector_index",
+            run_matching=True,
+        )
+    except Exception as e:
+        print(f"[startup] Products backfill failed, server will start anyway: {e}")
 
 
 @app.post("/extract", response_model=ExtractResponse)

@@ -1,8 +1,8 @@
 import requests
 
 from app.config import CATEGORIES_API_URL
-from app.embeddings import get_embedding
-from app.database import db
+from app.db_injection_pipeline import DBInjectionPipeline
+from app.embeddings import backfill_embeddings
 
 
 def fetch_real_categories():
@@ -19,21 +19,33 @@ def sync_categories():
         categories = fetch_real_categories()
         print(f"[category_sync] Fetched {len(categories)} categories from Spring Boot API")
 
-        db.categories.delete_many({})
+        normalized = [
+            {"name": c, "sourceId": None} if isinstance(c, str)
+            else {"name": c.get("name"), "sourceId": c.get("id")}
+            for c in categories
+        ]
 
-        for cat in categories:
-            name = cat if isinstance(cat, str) else cat.get("name")
-            if not name:
-                continue
-
-            embedding = get_embedding(name)
-            db.categories.insert_one({
-                "name": name,
-                "sourceId": cat.get("id") if isinstance(cat, dict) else None,
-                "embedding": embedding
-            })
-            print(f"[category_sync]   synced: {name}")
+        pipeline = DBInjectionPipeline(
+            collection_name="categories",
+            text_field="name",
+            id_field="sourceId",
+            vector_index_name="category_vector_index",  # matches matching.py -- no changes needed there
+        )
+        pipeline.run(source=normalized)
 
         print("[category_sync] Category sync complete.")
     except Exception as e:
-        print(f"[category_sync] FAILED — server will start without fresh categories: {e}")
+        print(f"[category_sync] FAILED -- server will start without fresh categories: {e}")
+
+    # Catches anything sitting in categories without an embedding --
+    # e.g. docs added via mongoimport/Compass rather than the pipeline above.
+    # Safe to re-run: only touches docs missing 'embedding'.
+    try:
+        print("[category_sync] Backfilling embeddings for any un-embedded categories...")
+        backfill_embeddings(
+            collection_name="categories",
+            text_field="name",
+            vector_index_name="category_vector_index",
+        )
+    except Exception as e:
+        print(f"[category_sync] Backfill failed: {e}")

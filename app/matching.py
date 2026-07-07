@@ -15,7 +15,7 @@ def find_nearest_category(product_embedding: list[float], top_k: int = 1) -> lis
                 "index": "category_vector_index",
                 "path": "embedding",
                 "queryVector": product_embedding,
-                "numCandidates": 768,
+                "numCandidates": 512,
                 "limit": top_k
             }
         },
