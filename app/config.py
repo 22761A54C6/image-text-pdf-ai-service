@@ -3,6 +3,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+PORT = int(os.environ.get("PORT", 6000))
+HOST = os.environ.get("HOST", "0.0.0.0")
+
 # GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 # GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 # GROQ_MODEL = "llama-3.3-70b-versatile"
@@ -10,8 +13,8 @@ load_dotenv()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GEMINI_EMBED_MODEL = "gemini-embedding-001"
 GEMINI_EMBED_DIMENSIONS = 512
-GEMINI_TEXT_MODEL="gemini-3.5-flash"
-# GEMINI_TEXT_MODEL = "gemini-2.5-flash"
+# GEMINI_TEXT_MODEL="gemini-3.5-flash"
+GEMINI_TEXT_MODEL = "gemini-2.5-flash"
 # GEMINI_TEXT_MODEL = "gemini-2.5-flash-lite"
 
 MONGO_URI = os.getenv("MONGO_URI")

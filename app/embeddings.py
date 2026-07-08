@@ -52,10 +52,10 @@ def get_embeddings_batch(texts: List[str], input_type: str = "document") -> List
     return embeddings
 
 
-def embed_and_store(products: List[dict]):
+def embed_and_store(products: List[dict], batch_id: str = None) -> List[dict]:
     if not products:
         print("[embed_and_store] no products to store")
-        return
+        return []
 
     raw_names = [p["name"] for p in products]
     normalized_names = normalize_product_names_batch(raw_names)
@@ -65,7 +65,7 @@ def embed_and_store(products: List[dict]):
         embeddings = get_embeddings_batch(normalized_names, input_type="document")
     except Exception as e:
         print(f"[embed_and_store] batch embedding failed: {e}")
-        return
+        return []
 
     print(f"[embed_and_store] {len(normalized_names)} names in, {len(embeddings)} embeddings out")
     if len(embeddings) != len(normalized_names):
@@ -77,6 +77,7 @@ def embed_and_store(products: List[dict]):
             classification = classify_match(embedding)
             docs.append({
                 "_id": str(uuid.uuid4()),
+                "batchId": batch_id,
                 "name": product["name"],
                 "normalizedName": normalized_name,
                 "price": product.get("price"),
@@ -88,12 +89,13 @@ def embed_and_store(products: List[dict]):
             })
         except Exception as e:
             print(f"[embed_and_store] failed to process '{product.get('name')}': {e}")
-            
+
     print(f"[embed_and_store] {len(products)} extracted, {len(docs)} survived to insert")
 
     if not docs:
         print("[embed_and_store] all products failed to process, nothing inserted")
-        return
+        return []
 
     result = db.products.insert_many(docs)
     print(f"[embed_and_store] inserted {len(result.inserted_ids)} of {len(products)} products")
+    return docs

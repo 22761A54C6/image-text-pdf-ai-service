@@ -1,5 +1,6 @@
 import re
 import json
+import time
 from typing import List
 
 from fastapi import HTTPException
@@ -32,18 +33,37 @@ match, go back and find what's missing.
     if not GEMINI_API_KEY:
         raise HTTPException(status_code=500, detail="GEMINI_API_KEY is not set")
 
-    try:
-        response = _client.models.generate_content(
-            model=GEMINI_TEXT_MODEL,
-            contents=prompt,
-            config=GenerateContentConfig(temperature=0.1, max_output_tokens=8192),
+    response = None
+    last_error = None
+    max_retries = 3
+
+    for attempt in range(max_retries):
+        try:
+            response = _client.models.generate_content(
+                model=GEMINI_TEXT_MODEL,
+                contents=prompt,
+                config=GenerateContentConfig(temperature=0.1, max_output_tokens=8192),
+            )
+            break  # success, stop retrying
+        except Exception as e:
+            last_error = e
+            error_str = str(e)
+            if "503" in error_str or "UNAVAILABLE" in error_str or "overloaded" in error_str.lower():
+                wait = 2 ** attempt  # 1s, 2s, 4s
+                print(f"[extract] Gemini overloaded (attempt {attempt + 1}/{max_retries}), retrying in {wait}s")
+                time.sleep(wait)
+                continue
+            # Non-retryable error -- fail immediately
+            raise HTTPException(status_code=502, detail=f"Could not reach Gemini: {e}")
+
+    if response is None:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Gemini is still unavailable after {max_retries} retries: {last_error}"
         )
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Could not reach Gemini: {e}")
 
     text_out = (response.text or "").strip()
 
-    # Check if Gemini stopped because it ran out of tokens rather than finishing naturally
     finish_reason = None
     try:
         finish_reason = response.candidates[0].finish_reason
@@ -63,13 +83,8 @@ match, go back and find what's missing.
             products = json.loads(match.group(0))
             return products
         except json.JSONDecodeError:
-            pass  # fall through to salvage attempt below
+            pass
 
-    # Salvage attempt: grab complete {...} objects even if the array wasn't
-    # properly closed (e.g. truncated mid-object due to max_output_tokens).
-    # This regex only matches flat objects with no nested braces, which is
-    # fine for our {"name": ..., "price": ...} shape -- any final incomplete
-    # object (missing closing brace) is simply skipped.
     partial_objects = re.findall(r"\{[^{}]*\}", text_out)
     if partial_objects:
         products = []
