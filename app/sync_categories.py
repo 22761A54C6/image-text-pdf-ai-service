@@ -1,8 +1,9 @@
 import requests
+from pymongo import UpdateOne
 
-from app.config import CATEGORIES_API_URL
-from app.db_injection_pipeline import DBInjectionPipeline
-from app.embeddings import backfill_embeddings
+from app.config import CATEGORIES_API_URL, GEMINI_EMBED_DIMENSIONS
+from app.database import db
+from app.embeddings import get_embeddings_batch
 
 
 def fetch_real_categories():
@@ -25,27 +26,47 @@ def sync_categories():
             for c in categories
         ]
 
-        pipeline = DBInjectionPipeline(
-            collection_name="categories",
-            text_field="name",
-            id_field="sourceId",
-            vector_index_name="category_vector_index",  # matches matching.py -- no changes needed there
-        )
-        pipeline.run(source=normalized)
+        if not normalized:
+            print("[category_sync] no categories to process, aborting")
+            return
 
-        print("[category_sync] Category sync complete.")
+        names = [c["name"] for c in normalized]
+        embeddings = get_embeddings_batch(names, input_type="document")
+        print(f"[category_sync] {len(embeddings)} vectors generated via Gemini")
+
+        collection = db["categories"]
+        operations = []
+        for record, embedding in zip(normalized, embeddings):
+            doc = dict(record)
+            doc.pop("_id", None)
+            doc["embeddedText"] = record["name"]
+            doc["embedding"] = embedding
+
+            record_id = record.get("sourceId")
+            filter_ = {"sourceId": record_id} if record_id is not None else {"name": record["name"]}
+            operations.append(UpdateOne(filter_, {"$set": doc}, upsert=True))
+
+        result = collection.bulk_write(operations)
+        written = result.upserted_count + result.modified_count
+        print(f"[category_sync] upserted {written} docs into 'categories'")
+
+        existing = {idx["name"] for idx in collection.list_search_indexes()}
+        if "category_vector_index" in existing:
+            print("[category_sync] index 'category_vector_index' already exists, skipping")
+        else:
+            collection.create_search_index({
+                "name": "category_vector_index",
+                "type": "vectorSearch",
+                "definition": {
+                    "fields": [
+                        {"type": "vector", "path": "embedding",
+                         "numDimensions": GEMINI_EMBED_DIMENSIONS, "similarity": "cosine"}
+                    ]
+                },
+            })
+            print(f"[category_sync] created index 'category_vector_index' ({GEMINI_EMBED_DIMENSIONS} dims). "
+                  f"Atlas needs ~1-2 min to finish building it.")
+
+        print(f"[category_sync] DONE -- {written} categories live, searchable via 'category_vector_index'")
     except Exception as e:
         print(f"[category_sync] FAILED -- server will start without fresh categories: {e}")
-
-    # Catches anything sitting in categories without an embedding --
-    # e.g. docs added via mongoimport/Compass rather than the pipeline above.
-    # Safe to re-run: only touches docs missing 'embedding'.
-    try:
-        print("[category_sync] Backfilling embeddings for any un-embedded categories...")
-        backfill_embeddings(
-            collection_name="categories",
-            text_field="name",
-            vector_index_name="category_vector_index",
-        )
-    except Exception as e:
-        print(f"[category_sync] Backfill failed: {e}")

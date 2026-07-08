@@ -1,9 +1,14 @@
 import re
 import json
 from typing import List
-import requests
+
 from fastapi import HTTPException
-from app.config import GROQ_URL, GROQ_MODEL, GROQ_API_KEY
+from google import genai
+from google.genai.types import GenerateContentConfig
+
+from app.config import GEMINI_API_KEY, GEMINI_TEXT_MODEL
+
+_client = genai.Client()
 
 
 def extract_products_with_llm(raw_text: str) -> List[dict]:
@@ -24,42 +29,57 @@ number of distinct product-like lines in the source. If they don't
 match, go back and find what's missing.
 """
 
-    if not GROQ_API_KEY:
-        raise HTTPException(status_code=500, detail="GROQ_API_KEY is not set")
+    if not GEMINI_API_KEY:
+        raise HTTPException(status_code=500, detail="GEMINI_API_KEY is not set")
 
     try:
-        response = requests.post(
-            GROQ_URL,
-            headers={
-                "Authorization": f"Bearer {GROQ_API_KEY}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": GROQ_MODEL,
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.1,
-                "max_tokens": 2048,
-            },
-            timeout=60,  # Groq is fast — no need for Ollama's long 180s timeout
+        response = _client.models.generate_content(
+            model=GEMINI_TEXT_MODEL,
+            contents=prompt,
+            config=GenerateContentConfig(temperature=0.1, max_output_tokens=8192),
         )
-    except requests.RequestException as e:
-        raise HTTPException(status_code=502, detail=f"Could not reach Groq: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Could not reach Gemini: {e}")
 
-    if response.status_code != 200:
-        raise HTTPException(status_code=502, detail=f"Groq extraction failed: {response.text[:300]}")
+    text_out = (response.text or "").strip()
 
+    # Check if Gemini stopped because it ran out of tokens rather than finishing naturally
+    finish_reason = None
     try:
-        text_out = response.json()["choices"][0]["message"]["content"].strip()
-    except (ValueError, KeyError, IndexError):
-        raise HTTPException(status_code=502, detail="Groq returned unexpected response format")
+        finish_reason = response.candidates[0].finish_reason
+    except (AttributeError, IndexError):
+        pass
+
+    if finish_reason == "MAX_TOKENS":
+        print(f"[extract] WARNING: Gemini hit max_output_tokens, response was truncated. "
+              f"Attempting to salvage partial output.")
+
+    if not text_out:
+        raise HTTPException(status_code=502, detail="Gemini returned an empty response")
 
     match = re.search(r"\[.*\]", text_out, re.DOTALL)
-    if not match:
-        raise HTTPException(status_code=502, detail=f"No JSON array found in LLM output: {text_out[:300]}")
+    if match:
+        try:
+            products = json.loads(match.group(0))
+            return products
+        except json.JSONDecodeError:
+            pass  # fall through to salvage attempt below
 
-    try:
-        products = json.loads(match.group(0))
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=502, detail=f"LLM did not return valid JSON: {text_out[:300]}")
+    # Salvage attempt: grab complete {...} objects even if the array wasn't
+    # properly closed (e.g. truncated mid-object due to max_output_tokens).
+    # This regex only matches flat objects with no nested braces, which is
+    # fine for our {"name": ..., "price": ...} shape -- any final incomplete
+    # object (missing closing brace) is simply skipped.
+    partial_objects = re.findall(r"\{[^{}]*\}", text_out)
+    if partial_objects:
+        products = []
+        for obj in partial_objects:
+            try:
+                products.append(json.loads(obj))
+            except json.JSONDecodeError:
+                continue
+        if products:
+            print(f"[extract] WARNING: recovered {len(products)} products from truncated/malformed output")
+            return products
 
-    return products
+    raise HTTPException(status_code=502, detail=f"No JSON array found in LLM output: {text_out[:300]}")

@@ -1,8 +1,7 @@
 from app.database import db
 
-# Below this score, don't trust the match — better to leave it
-# unmatched than confidently assign the wrong category.
-MIN_CONFIDENCE_SCORE = 0.80
+AUTO_MAP_THRESHOLD = 0.95
+VENDOR_CONFIRM_THRESHOLD = 0.85
 
 
 def find_nearest_category(product_embedding: list[float], top_k: int = 1) -> list[dict]:
@@ -24,23 +23,43 @@ def find_nearest_category(product_embedding: list[float], top_k: int = 1) -> lis
                 "_id": 0,
                 "name": 1,
                 "sourceId": 1,
-                "score": {"$meta": "vectorSearchScore"}   #categories are stored in the db with a field called "embedding"
+                "score": {"$meta": "vectorSearchScore"}
             }
         }
     ]
-
     return list(db.categories.aggregate(pipeline))
 
 
-
-def find_confident_category(product_embedding: list[float]) -> dict | None:
+def classify_match(product_embedding: list[float]) -> dict:
+    """
+    Tiered category matching:
+      score > 0.95         -> AUTO_MAPPED
+      0.80 <= score <= 0.95 -> PENDING_VENDOR_CONFIRMATION
+      score < 0.80 or no match -> NEEDS_ADMIN_REVIEW
+    """
     matches = find_nearest_category(product_embedding, top_k=1)
+
     if not matches:
-        return None
+        return {
+            "status": "CREATE_NEW_CATEGORY_OR_ADMIN_APPROVAL",
+            "matchedCategory": None,
+            "matchedCategorySourceId": None,
+            "matchedCategoryScore": None,
+        }
 
-    top_match = matches[0]
-    # Temporarily disabled to observe real scores:
-    if top_match["score"] < MIN_CONFIDENCE_SCORE:
-        return None
+    top = matches[0]
+    score = top["score"]
 
-    return top_match
+    if score > AUTO_MAP_THRESHOLD:
+        status = "AUTO_MAPPED"
+    elif score >= VENDOR_CONFIRM_THRESHOLD:
+        status = "PENDING_VENDOR_CONFIRMATION"
+    else:
+        status = "CREATE_NEW_CATEGORY_OR_ADMIN_APPROVAL"
+
+    return {
+        "status": status,
+        "matchedCategory": top["name"],
+        "matchedCategorySourceId": top["sourceId"],
+        "matchedCategoryScore": score,
+    }
