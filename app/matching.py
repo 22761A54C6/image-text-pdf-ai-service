@@ -34,8 +34,8 @@ def classify_match(product_embedding: list[float]) -> dict:
     """
     Tiered category matching:
       score > 0.95         -> AUTO_MAPPED
-      0.80 <= score <= 0.95 -> PENDING_VENDOR_CONFIRMATION
-      score < 0.80 or no match -> NEEDS_ADMIN_REVIEW
+      0.85 <= score <= 0.95 -> PENDING_VENDOR_CONFIRMATION
+      score < 0.85 or no match -> CREATE_NEW_CATEGORY_OR_ADMIN_APPROVAL
     """
     matches = find_nearest_category(product_embedding, top_k=1)
 
