@@ -13,14 +13,15 @@ HOST = os.environ.get("HOST", "0.0.0.0")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GEMINI_EMBED_MODEL = "gemini-embedding-001"
 GEMINI_EMBED_DIMENSIONS = 512
-# GEMINI_TEXT_MODEL="gemini-3.5-flash"
-GEMINI_TEXT_MODEL = "gemini-2.5-flash"
+GEMINI_TEXT_MODEL="gemini-3.5-flash"
+# GEMINI_TEXT_MODEL = "gemini-2.5-flash"
 # GEMINI_TEXT_MODEL = "gemini-2.5-flash-lite"
 
 MONGO_URI = os.getenv("MONGO_URI")
 MONGO_DB_NAME = "bizlink"
 
 CATEGORIES_API_URL = "https://dizziness-pasted-scarecrow.ngrok-free.dev/api/product/categories"
-
 ALLOWED_CONTENT_TYPES = {"image/jpeg", "image/png", "image/jpg", "image/webp", "image/bmp"}
+ALLOWED_PDF_CONTENT_TYPES = {"application/pdf"}
+# ALLOWED_AUDIO_CONTENT_TYPES = {"audio/ogg", "audio/mpeg", "audio/mp3", "audio/wav", "audio/x-wav", "audio/m4a", "audio/mp4"}
 MAX_FILE_SIZE_BYTES = 15 * 1024 * 1024

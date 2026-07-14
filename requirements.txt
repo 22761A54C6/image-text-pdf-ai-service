@@ -9,3 +9,5 @@ python-multipart==0.0.9
 pymongo==4.9.2
 python-dotenv==1.0.1
 google-genai
+pymupdf
+# faster-whisper

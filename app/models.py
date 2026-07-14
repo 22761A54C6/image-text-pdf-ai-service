@@ -18,3 +18,7 @@ class Product(BaseModel):
 class ExtractResponse(BaseModel):
     batchId: str
     products: List[Product]
+
+class TextExtractRequest(BaseModel):
+    text: str    
+    
