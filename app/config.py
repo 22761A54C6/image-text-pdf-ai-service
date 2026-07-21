@@ -20,7 +20,8 @@ GEMINI_TEXT_MODEL="gemini-3.5-flash"
 MONGO_URI = os.getenv("MONGO_URI")
 MONGO_DB_NAME = "bizlink"
 
-CATEGORIES_API_URL = "https://dizziness-pasted-scarecrow.ngrok-free.dev/api/product/categories"
+# CATEGORIES_API_URL = "https://dizziness-pasted-scarecrow.ngrok-free.dev/api/product/categories"
+CATEGORIES_API_URL = "http://192.168.0.109:8081/api/product/categories"                                                     
 ALLOWED_CONTENT_TYPES = {"image/jpeg", "image/png", "image/jpg", "image/webp", "image/bmp"}
 ALLOWED_PDF_CONTENT_TYPES = {"application/pdf"}
 # ALLOWED_AUDIO_CONTENT_TYPES = {"audio/ogg", "audio/mpeg", "audio/mp3", "audio/wav", "audio/x-wav", "audio/m4a", "audio/mp4"}

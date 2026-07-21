@@ -50,6 +50,18 @@ def sync_categories():
         written = result.upserted_count + result.modified_count
         print(f"[category_sync] upserted {written} docs into 'categories'")
 
+        # --- remove categories that no longer exist upstream ---
+        valid_source_ids = {r["sourceId"] for r in normalized if r["sourceId"] is not None}
+        valid_names = {r["name"] for r in normalized if r["sourceId"] is None}
+
+        delete_result = collection.delete_many({
+            "$or": [
+                {"sourceId": {"$ne": None, "$nin": list(valid_source_ids)}},
+                {"sourceId": None, "name": {"$nin": list(valid_names)}}
+            ]
+        })
+        print(f"[category_sync] removed {delete_result.deleted_count} stale categories")
+
         existing = {idx["name"] for idx in collection.list_search_indexes()}
         if "category_vector_index" in existing:
             print("[category_sync] index 'category_vector_index' already exists, skipping")

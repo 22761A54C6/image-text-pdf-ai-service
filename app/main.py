@@ -31,6 +31,21 @@ def startup_sync_categories():
     sync_categories()
 
 
+@app.post("/sync/categories")
+def trigger_category_sync():
+    """
+    Re-fetch categories from the Spring Boot API and reconcile Mongo:
+    adds new categories, updates changed ones, deletes ones no longer
+    present upstream.
+    """
+    try:
+        sync_categories()
+        return {"status": "ok", "message": "Category sync completed"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Category sync failed: {e}")
+
+
+
 @app.post("/image")
 async def extract(file: UploadFile = File(...)):
     print("!!!!!!!!!! EXTRACT ENDPOINT HIT !!!!!!!!!!")
