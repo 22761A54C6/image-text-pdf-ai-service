@@ -17,30 +17,45 @@ def load_document_text(file_path: str, content_type: str) -> str:
 
 
 def load_pdf_text(file_path: str) -> str:
-    doc = fitz.open(file_path)
+    try:
+        doc = fitz.open(file_path)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Could not open PDF (corrupt or invalid file): {e}")
+
     all_text = []
+    try:
+        for page_num, page in enumerate(doc):
+            try:
+                text = page.get_text().strip()
+            except Exception as e:
+                print(f"[pdf] page {page_num + 1}: failed to read text layer: {e}")
+                text = ""
 
-    for page_num, page in enumerate(doc):
-        text = page.get_text().strip()
+            if len(text) >= MIN_TEXT_LAYER_CHARS:
+                print(f"[pdf] page {page_num + 1}: found text layer ({len(text)} chars), skipping OCR")
+                all_text.append(text)
+            else:
+                print(f"[pdf] page {page_num + 1}: no usable text layer ({len(text)} chars), falling back to OCR")
+                try:
+                    pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
+                    img_array = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, pix.n)
 
-        if len(text) >= MIN_TEXT_LAYER_CHARS:
-            print(f"[pdf] page {page_num + 1}: found text layer ({len(text)} chars), skipping OCR")
-            all_text.append(text)
-        else:
-            print(f"[pdf] page {page_num + 1}: no usable text layer ({len(text)} chars), falling back to OCR")
-            pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
-            img_array = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, pix.n)
+                    if pix.n == 4:
+                        img_array = img_array[:, :, [2, 1, 0]]
+                    elif pix.n == 3:
+                        img_array = img_array[:, :, ::-1]
 
-            if pix.n == 4:
-                img_array = img_array[:, :, [2, 1, 0]]
-            elif pix.n == 3:
-                img_array = img_array[:, :, ::-1]
+                    ocr_text = run_ocr_on_array(img_array)
+                    all_text.append(ocr_text)
+                except HTTPException:
+                    raise
+                except Exception as e:
+                    print(f"[pdf] page {page_num + 1}: OCR fallback failed, skipping page: {e}")
+                    continue
 
-            ocr_text = run_ocr_on_array(img_array)
-            all_text.append(ocr_text)
-
-    page_count = len(doc)
-    doc.close()
+        page_count = len(doc)
+    finally:
+        doc.close()
 
     combined = "\n".join(t for t in all_text if t)
     print(f"[pdf] extracted {len(combined)} total chars from {page_count} page(s)")

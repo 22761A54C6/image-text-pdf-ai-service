@@ -3,6 +3,7 @@ from typing import List
 
 from google import genai
 from google.genai.types import EmbedContentConfig
+from fastapi import HTTPException
 
 from app.config import GEMINI_API_KEY, GEMINI_EMBED_MODEL, GEMINI_EMBED_DIMENSIONS
 from app.database import db
@@ -18,36 +19,47 @@ def get_embedding(text: str, input_type: str = "document") -> List[float]:
     Gemini tunes embeddings differently per task_type -- getting this wrong
     doesn't error, it just quietly makes matches worse."""
     if not GEMINI_API_KEY:
-        raise RuntimeError("GEMINI_API_KEY is not set -- add it to your .env file")
+        raise HTTPException(status_code=500, detail="GEMINI_API_KEY is not set -- add it to your .env file")
 
-    result = _client.models.embed_content(
-        model=GEMINI_EMBED_MODEL,
-        contents=[text],
-        config=EmbedContentConfig(
-            task_type=_TASK_TYPE.get(input_type, "RETRIEVAL_DOCUMENT"),
-            output_dimensionality=GEMINI_EMBED_DIMENSIONS,
-        ),
-    )
-    return result.embeddings[0].values
-
-
-def get_embeddings_batch(texts: List[str], input_type: str = "document") -> List[List[float]]:
-    """Batch version for the injection pipeline."""
-    if not GEMINI_API_KEY:
-        raise RuntimeError("GEMINI_API_KEY is not set -- add it to your .env file")
-
-    embeddings: List[List[float]] = []
-    batch_size = 100
-    for i in range(0, len(texts), batch_size):
-        chunk = texts[i:i + batch_size]
+    try:
         result = _client.models.embed_content(
             model=GEMINI_EMBED_MODEL,
-            contents=chunk,
+            contents=[text],
             config=EmbedContentConfig(
                 task_type=_TASK_TYPE.get(input_type, "RETRIEVAL_DOCUMENT"),
                 output_dimensionality=GEMINI_EMBED_DIMENSIONS,
             ),
         )
+        return result.embeddings[0].values
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Gemini embedding request failed: {e}")
+
+
+def get_embeddings_batch(texts: List[str], input_type: str = "document") -> List[List[float]]:
+    """Batch version for the injection pipeline."""
+    if not GEMINI_API_KEY:
+        raise HTTPException(status_code=500, detail="GEMINI_API_KEY is not set -- add it to your .env file")
+
+    embeddings: List[List[float]] = []
+    batch_size = 100
+    for i in range(0, len(texts), batch_size):
+        chunk = texts[i:i + batch_size]
+        try:
+            result = _client.models.embed_content(
+                model=GEMINI_EMBED_MODEL,
+                contents=chunk,
+                config=EmbedContentConfig(
+                    task_type=_TASK_TYPE.get(input_type, "RETRIEVAL_DOCUMENT"),
+                    output_dimensionality=GEMINI_EMBED_DIMENSIONS,
+                ),
+            )
+        except Exception as e:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Gemini embedding request failed on batch {i // batch_size + 1}: {e}"
+            )
         embeddings.extend(e.values for e in result.embeddings)
     return embeddings
 
@@ -61,15 +73,17 @@ def embed_and_store(products: List[dict], batch_id: str = None) -> List[dict]:
     normalized_names = normalize_product_names_batch(raw_names)
     print(f"[embed_and_store] normalized {len(normalized_names)} names via Gemini")
 
-    try:
-        embeddings = get_embeddings_batch(normalized_names, input_type="document")
-    except Exception as e:
-        print(f"[embed_and_store] batch embedding failed: {e}")
-        return []
+    # Let embedding failures propagate -- silently returning [] here previously
+    # made callers believe storage succeeded with 0 products saved.
+    embeddings = get_embeddings_batch(normalized_names, input_type="document")
 
     print(f"[embed_and_store] {len(normalized_names)} names in, {len(embeddings)} embeddings out")
     if len(embeddings) != len(normalized_names):
-        print("[embed_and_store] WARNING: embedding count mismatch -- some products will be dropped by zip()")
+        raise HTTPException(
+            status_code=502,
+            detail=f"Embedding count mismatch: got {len(embeddings)} embeddings for "
+                   f"{len(normalized_names)} products"
+        )
 
     docs = []
     for product, normalized_name, embedding in zip(products, normalized_names, embeddings):

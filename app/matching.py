@@ -1,3 +1,5 @@
+from fastapi import HTTPException
+
 from app.database import db
 
 AUTO_MAP_THRESHOLD = 0.95
@@ -27,7 +29,10 @@ def find_nearest_category(product_embedding: list[float], top_k: int = 1) -> lis
             }
         }
     ]
-    return list(db.categories.aggregate(pipeline))
+    try:
+        return list(db.categories.aggregate(pipeline))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Category vector search failed: {e}")
 
 
 def classify_match(product_embedding: list[float]) -> dict:

@@ -1,12 +1,14 @@
 import os
 import tempfile
 import json
+import logging
 from typing import List
 import uuid
 
 import uvicorn
 from app.config import HOST, PORT
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI, HTTPException, UploadFile, File, Request
+from fastapi.responses import JSONResponse
 
 from app.document_loader import load_document_text, load_pdf_text
 from app.config import ALLOWED_CONTENT_TYPES, MAX_FILE_SIZE_BYTES
@@ -19,7 +21,21 @@ from app.database import db
 
 ALLOWED_PDF_CONTENT_TYPES = {"application/pdf"}
 
+logger = logging.getLogger("uvicorn.error")
+
 app = FastAPI(title="Menu AI Extraction Service")
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    """Safety net for anything not already raised as an HTTPException --
+    ensures the client always gets clean JSON instead of a raw 500/traceback."""
+    logger.exception(f"Unhandled error on {request.method} {request.url.path}")
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "An unexpected error occurred. Please try again."},
+    )
+
 
 if __name__ == "__main__":
     uvicorn.run("app.main:app", host=HOST, port=PORT, reload=True)
@@ -28,7 +44,12 @@ if __name__ == "__main__":
 @app.on_event("startup")
 def startup_sync_categories():
     print("[startup] Syncing categories from Spring Boot API...")
-    sync_categories()
+    try:
+        sync_categories()
+    except Exception as e:
+        # Don't crash the whole service if the Spring Boot API is unreachable
+        # at boot time -- log it and let /sync/categories be retried later.
+        print(f"[startup] Category sync failed, continuing without fresh categories: {e}")
 
 
 @app.post("/sync/categories")
@@ -42,8 +63,7 @@ def trigger_category_sync():
         sync_categories()
         return {"status": "ok", "message": "Category sync completed"}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Category sync failed: {e}")
-
+        raise HTTPException(status_code=502, detail=f"Category sync failed: {e}")
 
 
 @app.post("/image")
@@ -233,9 +253,6 @@ def get_pdf_products_by_batch(batch_id: str):
         raise HTTPException(status_code=404, detail=f"No products found for batchId '{batch_id}'")
 
     return products
-
-
-
 
 
 @app.post("/getText")

@@ -15,9 +15,6 @@ def preprocess_image(image_path: str):
     if img is None:
         raise HTTPException(status_code=400, detail="Could not read uploaded image")
 
-    
-
-
     target_width = 2400  # more aggressive than before
     h, w = img.shape[:2]
     if w < target_width:
@@ -28,25 +25,40 @@ def preprocess_image(image_path: str):
 
 
 def run_ocr(processed_img) -> str:
-    result = ocr_engine.ocr(processed_img, cls=True)
+    try:
+        result = ocr_engine.ocr(processed_img, cls=True)
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"OCR failed to process image: {e}")
+
     lines = []
-    for block in result:
+    for block in result or []:
         if not block:
             continue
         for line in block:
-            text = line[1][0]
-            lines.append(text)
+            try:
+                text = line[1][0]
+                lines.append(text)
+            except (IndexError, TypeError):
+                continue
     return "\n".join(lines)
+
 
 def run_ocr_on_array(img_array) -> str:
     """Same OCR logic as run_ocr, but for an in-memory image array
     (used for PDF pages rendered directly from PyMuPDF, no file path)."""
-    result = ocr_engine.ocr(img_array, cls=True)
+    try:
+        result = ocr_engine.ocr(img_array, cls=True)
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"OCR failed to process PDF page: {e}")
+
     lines = []
-    for block in result:
+    for block in result or []:
         if not block:
             continue
         for line in block:
-            text = line[1][0]
-            lines.append(text)
+            try:
+                text = line[1][0]
+                lines.append(text)
+            except (IndexError, TypeError):
+                continue
     return "\n".join(lines)
