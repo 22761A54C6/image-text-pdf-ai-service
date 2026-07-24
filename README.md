@@ -2,6 +2,10 @@
 
 A FastAPI-based service for extracting product information from images, PDFs, and raw text using OCR and LLM processing.
 
+## Repository
+
+GitHub: https://github.com/22761A54C6/image-text-pdf-ai-service
+
 ## Features
 
 - **Image OCR**: Extract text from menu images using PaddleOCR
