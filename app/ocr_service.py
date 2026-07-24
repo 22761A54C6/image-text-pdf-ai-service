@@ -1,6 +1,9 @@
 import cv2
+import logging
 from fastapi import HTTPException
 from paddleocr import PaddleOCR
+
+logging.getLogger("ppocr").setLevel(logging.WARNING)
 
 # Loaded once at import time (heavy — don't reload per request)
 ocr_engine = PaddleOCR(use_angle_cls=True, lang="en")

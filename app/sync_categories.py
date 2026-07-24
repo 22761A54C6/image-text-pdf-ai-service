@@ -27,6 +27,9 @@ def sync_categories():
         for c in categories
     ]
 
+    # Filter out categories with empty or None names to avoid Gemini embedding errors
+    normalized = [c for c in normalized if c["name"] and c["name"].strip()]
+
     if not normalized:
         print("[category_sync] no categories to process, aborting")
         return
