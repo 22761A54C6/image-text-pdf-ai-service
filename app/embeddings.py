@@ -10,7 +10,7 @@ from app.database import db
 from app.matching import classify_match
 from app.normalization import normalize_product_names_batch
 
-_client = genai.Client()  # reads GEMINI_API_KEY from env automatically
+_client = genai.Client(api_key=GEMINI_API_KEY)
 _TASK_TYPE = {"document": "RETRIEVAL_DOCUMENT", "query": "RETRIEVAL_QUERY"}
 
 

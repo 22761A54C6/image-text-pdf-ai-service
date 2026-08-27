@@ -5,7 +5,7 @@ from google import genai
 
 from app.config import GEMINI_API_KEY, GEMINI_TEXT_MODEL
 
-_client = genai.Client()
+_client = genai.Client(api_key=GEMINI_API_KEY)
 
 _SYSTEM_PROMPT = (
     "You normalize restaurant menu item names for search matching. "

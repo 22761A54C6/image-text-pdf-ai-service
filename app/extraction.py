@@ -9,7 +9,7 @@ from google.genai.types import GenerateContentConfig
 
 from app.config import GEMINI_API_KEY, GEMINI_TEXT_MODEL
 
-_client = genai.Client()
+_client = genai.Client(api_key=GEMINI_API_KEY)
 
 
 def extract_products_with_llm(raw_text: str) -> List[dict]:
@@ -17,14 +17,13 @@ def extract_products_with_llm(raw_text: str) -> List[dict]:
 OCR TEXT:
 {raw_text}
 Return ONLY a JSON array, no explanation, no markdown fences. Each item:
-{{"name": "...", "price": number}}
+{{"name": "...", "price": number or null}}
 IMPORTANT RULES:
 - All output text (name) MUST be in English only. Never use Chinese or any other language.
-- If price is missing for a line, skip that line entirely.
+- If price is missing for a line, include the item with price set to null.
 - Do not repeat the same item twice.
-Extract every distinct product name and price you see in the text/image.
-Do not skip, merge, or omit any item, even if the name or price looks 
-garbled or uncertain.
+Extract every distinct product name you see in the text/image.
+Do not skip, merge, or omit any item, even if the name looks garbled or uncertain.
 Before finalizing, count the number of items in your output and the 
 number of distinct product-like lines in the source. If they don't 
 match, go back and find what's missing.

@@ -16,7 +16,7 @@ from fastapi import FastAPI, HTTPException, UploadFile, File, Request
 from fastapi.responses import JSONResponse
 
 from app.document_loader import load_document_text, load_pdf_text
-from app.config import ALLOWED_CONTENT_TYPES, MAX_FILE_SIZE_BYTES
+from app.config import ALLOWED_CONTENT_TYPES, ALLOWED_PDF_CONTENT_TYPES, MAX_FILE_SIZE_BYTES
 from app.models import ExtractResponse, Product, TextExtractRequest
 from app.ocr_service import preprocess_image, run_ocr
 from app.extraction import extract_products_with_llm
@@ -438,6 +438,19 @@ def get_text_batch(batch_id: str):
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/debug/config")
+def debug_config():
+    """Debug endpoint to check configuration (remove in production)"""
+    from app.config import GEMINI_API_KEY
+    key_present = bool(GEMINI_API_KEY)
+    key_prefix = GEMINI_API_KEY[:8] + "..." if GEMINI_API_KEY else None
+    return {
+        "gemini_api_key_present": key_present,
+        "gemini_api_key_prefix": key_prefix,
+        "gemini_text_model": os.getenv("GEMINI_TEXT_MODEL"),
+    }
 
 
 if __name__ == "__main__":
