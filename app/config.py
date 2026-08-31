@@ -9,7 +9,7 @@ HOST = os.environ.get("HOST", "127.0.0.1")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GEMINI_EMBED_MODEL = "gemini-embedding-001"
 GEMINI_EMBED_DIMENSIONS = 512
-GEMINI_TEXT_MODEL = "gemini-3.6-flash"
+GEMINI_TEXT_MODEL = "gemini-2.5-flash"
 
 MONGO_URI = os.getenv("MONGO_URI")
 MONGO_DB_NAME = "bizlink"

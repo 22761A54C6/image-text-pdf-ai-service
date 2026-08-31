@@ -155,13 +155,32 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 @app.on_event("startup")
 async def startup_sync_categories():
     await send_to_opensearch({"event": "startup", "message": "Syncing categories from Spring Boot API", "@timestamp": datetime.utcnow().isoformat()})
-    try:
-        sync_categories()
-        await send_to_opensearch({"event": "startup", "message": "Category sync completed", "@timestamp": datetime.utcnow().isoformat()})
-    except Exception as e:
-        # Don't crash the whole service if the Spring Boot API is unreachable
-        # at boot time -- log it and let /sync/categories be retried later.
-        await send_to_opensearch({"event": "startup", "message": "Category sync failed", "error": str(e), "@timestamp": datetime.utcnow().isoformat()})
+
+    max_startup_retries = 5
+    base_delay = 3  # seconds -- 3, 6, 12, 24, 48
+
+    for attempt in range(1, max_startup_retries + 1):
+        try:
+            sync_categories()
+            await send_to_opensearch({"event": "startup", "message": "Category sync completed", "attempt": attempt, "@timestamp": datetime.utcnow().isoformat()})
+            return
+        except Exception as e:
+            await send_to_opensearch({
+                "event": "startup",
+                "message": "Category sync attempt failed",
+                "attempt": attempt,
+                "error": str(e),
+                "@timestamp": datetime.utcnow().isoformat()
+            })
+            if attempt == max_startup_retries:
+                # Don't crash the whole service if the Spring Boot API is still
+                # unreachable after retries -- log it and let /sync/categories
+                # be triggered manually later.
+                await send_to_opensearch({"event": "startup", "message": "Category sync gave up after retries", "attempts": attempt, "@timestamp": datetime.utcnow().isoformat()})
+                return
+            delay = base_delay * (2 ** (attempt - 1))
+            print(f"[startup] category sync failed (attempt {attempt}/{max_startup_retries}), retrying in {delay}s: {e}")
+            await asyncio.sleep(delay)
 
 
 @app.post("/sync/categories")
@@ -440,17 +459,17 @@ def health():
     return {"status": "ok"}
 
 
-@app.get("/debug/config")
-def debug_config():
-    """Debug endpoint to check configuration (remove in production)"""
-    from app.config import GEMINI_API_KEY
-    key_present = bool(GEMINI_API_KEY)
-    key_prefix = GEMINI_API_KEY[:8] + "..." if GEMINI_API_KEY else None
-    return {
-        "gemini_api_key_present": key_present,
-        "gemini_api_key_prefix": key_prefix,
-        "gemini_text_model": os.getenv("GEMINI_TEXT_MODEL"),
-    }
+# @app.get("/debug/config")
+# def debug_config():
+#     """Debug endpoint to check configuration (remove in production)"""
+#     from app.config import GEMINI_API_KEY
+#     key_present = bool(GEMINI_API_KEY)
+#     key_prefix = GEMINI_API_KEY[:8] + "..." if GEMINI_API_KEY else None
+#     return {
+#         "gemini_api_key_present": key_present,
+#         "gemini_api_key_prefix": key_prefix,
+#         "gemini_text_model": os.getenv("GEMINI_TEXT_MODEL"),
+#     }
 
 
 if __name__ == "__main__":
