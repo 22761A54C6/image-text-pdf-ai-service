@@ -1,10 +1,9 @@
 import time
 
-import requests
 from pymongo import UpdateOne
 
-from app.config import CATEGORIES_API_URL, GEMINI_EMBED_DIMENSIONS
-from app.database import db
+from app.config import GEMINI_EMBED_DIMENSIONS
+from app.database import db, catalog_db
 from app.embeddings import get_embeddings_batch
 
 # How many categories to embed+upsert per group. Kept separate from
@@ -16,12 +15,23 @@ SYNC_CHUNK_DELAY_SECONDS = 5  # pause between chunks to ease quota pressure
 
 
 def fetch_real_categories():
-    response = requests.get(
-        CATEGORIES_API_URL,
-        headers={"ngrok-skip-browser-warning": "true"}
-    )
-    response.raise_for_status()
-    return response.json()
+    """
+    Reads categories directly from Spring Boot's own Mongo database
+    (catalog.categories on 192.168.0.109:27017) instead of calling
+    http://192.168.0.109:8081/api/product/categories over HTTP.
+    Returns the same shape the old API response gave us: a list of
+    dicts with "id", "name", and "parentCategoryId".
+    Note: "parentId" also exists on these docs but is unrelated to the
+    category hierarchy -- "parentCategoryId" is the real subcategory link.
+    """
+    docs = catalog_db.categories.find({})
+    result = []
+    for doc in docs:
+        entry = {"id": str(doc.get("_id")), "name": doc.get("name")}
+        if "parentCategoryId" in doc:
+            entry["parentCategoryId"] = doc["parentCategoryId"]
+        result.append(entry)
+    return result
 
 
 def _chunked(items, size):
@@ -33,7 +43,7 @@ def sync_categories():
     """Raises on failure -- callers decide whether to swallow (startup)
     or surface the error (the /sync/categories endpoint)."""
     categories = fetch_real_categories()
-    print(f"[category_sync] Fetched {len(categories)} categories from Spring Boot API")
+    print(f"[category_sync] Fetched {len(categories)} categories from catalog Mongo DB")
 
     # Only sync top-level categories -- items with a non-null parentCategoryId
     # are subcategories nested under another category (e.g. "Fried Rice" under
@@ -41,11 +51,11 @@ def sync_categories():
     # near-duplicate/overlapping entries.
     top_level = [
         c for c in categories
-        if isinstance(c, str) or c.get("parentCategoryId") is None
+        if isinstance(c, str) or "parentCategoryId" not in c
     ]
     skipped = len(categories) - len(top_level)
     print(f"[category_sync] {len(top_level)} top-level categories "
-          f"(skipped {skipped} with a non-null parentCategoryId)")
+          f"(skipped {skipped} that have a parentCategoryId field)")
 
     normalized = [
         {"name": c, "sourceId": None} if isinstance(c, str)

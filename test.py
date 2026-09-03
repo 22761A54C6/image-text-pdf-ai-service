@@ -1,10 +1,14 @@
-from app.database import db
+from pymongo import MongoClient
 
-bad_docs = list(db.products.find({"normalizedName": {"$regex": "```"}}))
+c = MongoClient('mongodb://192.168.0.109:27017')
 
-print(f"Found {len(bad_docs)} product(s) with corrupted normalizedName:\n")
-for doc in bad_docs:
-    print(f"_id: {doc['_id']}")
-    print(f"name: {doc['name']}")
-    print(f"normalizedName (first 100 chars): {doc['normalizedName'][:100]}...")
-    print("-" * 40)
+doc = c['catalog'].categories.find_one()
+print('sample doc:')
+print(doc)
+print()
+
+print('all field names seen across a few docs:')
+fields = set()
+for d in c['catalog'].categories.find().limit(20):
+    fields.update(d.keys())
+print(fields)

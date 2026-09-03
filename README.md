@@ -11,8 +11,9 @@ GitHub: https://github.com/22761A54C6/image-text-pdf-ai-service
 - **Image OCR**: Extract text from menu images using PaddleOCR
 - **PDF Processing**: Extract text from PDFs with OCR fallback for scanned documents
 - **Text Extraction**: Process raw text input
-- **LLM Integration**: Use Gemini AI for intelligent product extraction
-- **Product Matching**: Vector-based category matching using MongoDB Atlas
+- **LLM Integration**: Use Gemini AI (gemini-2.5-flash) for intelligent product extraction and normalization
+- **Product Matching**: Vector-based category matching using MongoDB Atlas Vector Search
+- **Category Sync**: Direct MongoDB-to-MongoDB category synchronization with chunking for quota management
 - **Logging**: Centralized logging to OpenSearch with circuit breaker pattern
 
 ## Prerequisites
@@ -63,8 +64,9 @@ GitHub: https://github.com/22761A54C6/image-text-pdf-ai-service
    OPENSEARCH_RETRIES=3
    OPENSEARCH_RETRY_DELAY=1
 
-   # Categories API
-   CATEGORIES_API_URL=http://192.168.0.109:8081/api/product/categories
+   # Categories API (MongoDB connection for direct catalog DB access)
+   CATALOG_MONGO_URI=mongodb+srv://username:password@cluster.mongodb.net/catalog
+   CATALOG_MONGO_DB_NAME=catalog
    ```
 
 ## External Dependencies Setup
@@ -73,9 +75,10 @@ GitHub: https://github.com/22761A54C6/image-text-pdf-ai-service
 
 1. Create a MongoDB Atlas account
 2. Create a cluster with vector search support
-3. Create a database named `bizlink`
-4. Create collections: `categories`, `products`
-5. Enable vector search index on `categories` collection:
+3. Create databases:
+   - `bizlink` - Main application database with `categories` and `products` collections
+   - `catalog` - Spring Boot's catalog database with `categories` collection
+4. Enable vector search index on `bizlink.categories` collection:
    - Index name: `category_vector_index`
    - Vector dimensions: 512
    - Similarity: cosine
@@ -227,10 +230,21 @@ GET /products/pdf/{batch_id}
 GET /products/text/{batch_id}
 ```
 
+### Get Categories
+```http
+GET /api/categories
+```
+Reads categories directly from Spring Boot's MongoDB catalog database.
+
 ### Sync Categories
 ```http
 POST /sync/categories
 ```
+Syncs categories from catalog MongoDB to bizlink MongoDB with embeddings.
+- Processes in chunks of 50 categories with 5-second delays for quota management
+- Skips subcategories (only syncs top-level categories)
+- Re-embeds only new or changed categories (unchanged ones are skipped)
+- Creates/updates vector search index automatically
 
 ## File Size Limits
 
@@ -241,16 +255,43 @@ POST /sync/categories
 ## Architecture
 
 ```
-Client Request
+Client Request (Image/PDF/Text)
     ↓
 FastAPI Service
     ↓
-├── OCR Processing (PaddleOCR)
-├── LLM Extraction (Gemini)
-├── Normalization (Gemini)
-├── Embedding (Gemini)
-├── Category Matching (MongoDB Vector Search)
+├── Document Loading (document_loader.py)
+│   ├── Image OCR (PaddleOCR via ocr_service.py)
+│   └── PDF Text Extraction (PyMuPDF + OCR fallback)
+│
+├── Product Extraction (extraction.py)
+│   └── Gemini AI (gemini-2.5-flash) - Extract products from OCR text
+│
+├── Product Normalization (normalization.py)
+│   └── Gemini AI (gemini-2.5-flash) - Normalize product names for matching
+│
+├── Embedding Generation (embeddings.py)
+│   └── Gemini AI (gemini-embedding-001) - Generate 512-dim embeddings
+│
+├── Category Matching (matching.py)
+│   └── MongoDB Atlas Vector Search - Match products to categories
+│       ├── AUTO_MAPPED (score > 0.95)
+│       ├── PENDING_VENDOR_CONFIRMATION (0.85 <= score <= 0.95)
+│       └── CREATE_NEW_CATEGORY_OR_ADMIN_APPROVAL (score < 0.85)
+│
+├── Product Storage (MongoDB)
+│   └── Store products with embeddings and match results
+│
+├── Category Sync (sync_categories.py)
+│   ├── Read from catalog MongoDB (Spring Boot's DB)
+│   ├── Filter top-level categories only
+│   ├── Skip unchanged categories (quota optimization)
+│   ├── Chunk processing (50 categories/chunk, 5s delay)
+│   ├── Generate embeddings via Gemini
+│   ├── Upsert to bizlink MongoDB
+│   └── Create/update vector search index
+│
 └── Logging (OpenSearch)
+    └── Circuit breaker pattern for resilience
 ```
 
 ## Logging
@@ -273,9 +314,11 @@ Logs are sent to OpenSearch with the following structure:
 - Ensure PaddleOCR is properly installed
 
 ### Category matching fails
-- Verify MongoDB Atlas vector search index exists
+- Verify MongoDB Atlas vector search index exists on `bizlink.categories`
 - Check that categories are synced via `/sync/categories` endpoint
-- Ensure embedding dimensions match (512)
+- Ensure catalog MongoDB connection is configured in `.env`
+- Verify embedding dimensions match (512)
+- Check if only top-level categories are synced (subcategories are filtered out)
 
 ### Logging errors
 - Verify OpenSearch is running
@@ -289,17 +332,17 @@ Logs are sent to OpenSearch with the following structure:
 Image-Text-Pdf-AI-Service/
 ├── app/
 │   ├── __init__.py
-│   ├── main.py              # FastAPI application
-│   ├── config.py            # Configuration
+│   ├── main.py              # FastAPI application with endpoints
+│   ├── config.py            # Configuration (Gemini models, MongoDB, file limits)
 │   ├── models.py            # Pydantic models
-│   ├── database.py          # MongoDB connection
-│   ├── ocr_service.py        # OCR processing
-│   ├── extraction.py        # LLM extraction
-│   ├── embeddings.py        # Embedding generation
-│   ├── matching.py          # Category matching
-│   ├── normalization.py     # Name normalization
-│   ├── document_loader.py   # PDF/image loading
-│   └── sync_categories.py   # Category sync
+│   ├── database.py          # MongoDB connections (bizlink + catalog)
+│   ├── ocr_service.py        # OCR processing with PaddleOCR
+│   ├── extraction.py        # LLM product extraction (Gemini 2.5-flash)
+│   ├── embeddings.py        # Embedding generation (Gemini embedding-001)
+│   ├── matching.py          # Category matching with vector search
+│   ├── normalization.py     # Product name normalization (Gemini 2.5-flash)
+│   ├── document_loader.py   # PDF/image loading utilities
+│   └── sync_categories.py   # Category sync with chunking and quota optimization
 ├── requirements.txt
 ├── .env
 └── README.md

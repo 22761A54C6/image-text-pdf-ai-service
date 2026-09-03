@@ -14,7 +14,6 @@ GEMINI_TEXT_MODEL = "gemini-2.5-flash"
 MONGO_URI = os.getenv("MONGO_URI")
 MONGO_DB_NAME = "bizlink"
 
-CATEGORIES_API_URL = "http://192.168.0.109:8081/api/product/categories"
 ALLOWED_CONTENT_TYPES = {"image/jpeg", "image/png", "image/jpg", "image/webp", "image/bmp"}
 ALLOWED_PDF_CONTENT_TYPES = {"application/pdf"}
 MAX_FILE_SIZE_BYTES = 15 * 1024 * 1024

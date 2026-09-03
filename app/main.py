@@ -21,8 +21,7 @@ from app.models import ExtractResponse, Product, TextExtractRequest
 from app.ocr_service import preprocess_image, run_ocr
 from app.extraction import extract_products_with_llm
 from app.embeddings import embed_and_store
-from app.sync_categories import sync_categories
-from app.database import db
+from app.database import db, catalog_db
 
 logging.getLogger("uvicorn").setLevel(logging.WARNING)
 logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
@@ -41,19 +40,19 @@ class CircuitBreaker:
         self.failure_count = 0
         self.last_failure_time = None
         self.state = "closed"  # closed, open, half-open
-    
+
     def record_failure(self):
         self.failure_count += 1
         self.last_failure_time = time.time()
         if self.failure_count >= self.failure_threshold:
             self.state = "open"
         return self.state
-    
+
     def record_success(self):
         self.failure_count = 0
         self.state = "closed"
         return self.state
-    
+
     def can_attempt(self):
         if self.state == "closed":
             return True
@@ -82,10 +81,10 @@ async def send_to_opensearch(log_data):
     """Send log data directly to OpenSearch via HTTP with retry logic and circuit breaker"""
     if not circuit_breaker.can_attempt():
         return  # Circuit breaker is open, skip
-    
+
     index_name = f"image-text-pdf-logs-{datetime.utcnow().strftime('%Y.%m.%d')}"
     url = f"{OPENSEARCH_HOST}/{index_name}/_doc"
-    
+
     for attempt in range(OPENSEARCH_RETRIES):
         try:
             session = await get_aiohttp_session()
@@ -116,13 +115,24 @@ async def shutdown_event():
     await send_to_opensearch({"event": "shutdown", "message": "Service shutting down", "@timestamp": datetime.utcnow().isoformat()})
     await close_aiohttp_session()
 
+@app.on_event("startup")
+async def startup_sync_categories():
+    from app.sync_categories import sync_categories
+    print("[startup] Syncing categories from catalog MongoDB...")
+    try:
+        sync_categories()
+        print("[startup] Category sync completed successfully")
+    except Exception as e:
+        print(f"[startup] Category sync failed: {e}")
+        # Don't crash the whole service if sync fails
+
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     """Log all HTTP requests with status codes"""
     start_time = datetime.utcnow()
     response = await call_next(request)
     duration = (datetime.utcnow() - start_time).total_seconds()
-    
+
     log_data = {
         "event": "http_request",
         "method": request.method,
@@ -152,49 +162,43 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
     )
 
 
-@app.on_event("startup")
-async def startup_sync_categories():
-    await send_to_opensearch({"event": "startup", "message": "Syncing categories from Spring Boot API", "@timestamp": datetime.utcnow().isoformat()})
+@app.get("/api/top-categories")
+def get_categories():
+    """
+    Reads top-level categories directly from Spring Boot's own Mongo
+    database (catalog.categories on 192.168.0.109:27017) -- same data
+    you'd get from GET http://192.168.0.109:8081/api/product/categories,
+    but read straight from Mongo instead of an HTTP call to Spring Boot.
+    Subcategories (docs with a non-null parentCategoryId) are excluded,
+    matching the top-level-only filtering used in sync_categories.py.
+    Note: these docs also have an unrelated "parentId" field -- that is
+    not the category hierarchy link, so it's ignored here.
+    """
+    docs = catalog_db.categories.find({"parentCategoryId": {"$exists": False}})
 
-    max_startup_retries = 5
-    base_delay = 3  # seconds -- 3, 6, 12, 24, 48
+    categories = []
+    for doc in docs:
+        categories.append({
+            "id": str(doc.get("_id")),
+            "name": doc.get("name"),
+        })
 
-    for attempt in range(1, max_startup_retries + 1):
-        try:
-            sync_categories()
-            await send_to_opensearch({"event": "startup", "message": "Category sync completed", "attempt": attempt, "@timestamp": datetime.utcnow().isoformat()})
-            return
-        except Exception as e:
-            await send_to_opensearch({
-                "event": "startup",
-                "message": "Category sync attempt failed",
-                "attempt": attempt,
-                "error": str(e),
-                "@timestamp": datetime.utcnow().isoformat()
-            })
-            if attempt == max_startup_retries:
-                # Don't crash the whole service if the Spring Boot API is still
-                # unreachable after retries -- log it and let /sync/categories
-                # be triggered manually later.
-                await send_to_opensearch({"event": "startup", "message": "Category sync gave up after retries", "attempts": attempt, "@timestamp": datetime.utcnow().isoformat()})
-                return
-            delay = base_delay * (2 ** (attempt - 1))
-            print(f"[startup] category sync failed (attempt {attempt}/{max_startup_retries}), retrying in {delay}s: {e}")
-            await asyncio.sleep(delay)
+    return categories
 
 
 @app.post("/sync/categories")
-def trigger_category_sync():
+def sync_categories_endpoint():
     """
-    Re-fetch categories from the Spring Boot API and reconcile Mongo:
-    adds new categories, updates changed ones, deletes ones no longer
-    present upstream.
+    Manually trigger category sync from catalog MongoDB to bizlink MongoDB.
+    Call this endpoint when frontend adds new categories to refresh the
+    vector index with the latest categories.
     """
+    from app.sync_categories import sync_categories
     try:
         sync_categories()
-        return {"status": "ok", "message": "Category sync completed"}
+        return {"status": "success", "message": "Categories synced successfully"}
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Category sync failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Category sync failed: {e}")
 
 
 @app.post("/image")
@@ -457,19 +461,6 @@ def get_text_batch(batch_id: str):
 @app.get("/health")
 def health():
     return {"status": "ok"}
-
-
-# @app.get("/debug/config")
-# def debug_config():
-#     """Debug endpoint to check configuration (remove in production)"""
-#     from app.config import GEMINI_API_KEY
-#     key_present = bool(GEMINI_API_KEY)
-#     key_prefix = GEMINI_API_KEY[:8] + "..." if GEMINI_API_KEY else None
-#     return {
-#         "gemini_api_key_present": key_present,
-#         "gemini_api_key_prefix": key_prefix,
-#         "gemini_text_model": os.getenv("GEMINI_TEXT_MODEL"),
-#     }
 
 
 if __name__ == "__main__":
